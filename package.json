@@ -1,0 +1,10 @@
+{
+  "name": "p2p",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n sig,web -c blue,green \"cd signaling && npm run dev\" \"cd web && npm run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
