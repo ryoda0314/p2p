@@ -30,22 +30,48 @@ function fromBase64Url(str: string): Uint8Array {
 }
 
 function stripSdp(sdp: string): string {
-  return sdp
-    .split("\r\n")
-    .filter((line) => {
-      // Remove empty lines, session-level stuff that's redundant
-      if (!line) return false;
-      if (line.startsWith("a=msid-semantic")) return false;
-      if (line.startsWith("a=group:BUNDLE")) return false;
-      if (line.startsWith("a=extmap-allow-mixed")) return false;
-      return true;
-    })
-    .join("\n"); // \n instead of \r\n saves bytes
+  const lines = sdp.split("\r\n").filter(Boolean);
+  const kept: string[] = [];
+
+  for (const line of lines) {
+    // Remove session boilerplate
+    if (line.startsWith("a=msid-semantic")) continue;
+    if (line.startsWith("a=group:BUNDLE")) continue;
+    if (line.startsWith("a=extmap-allow-mixed")) continue;
+    // Remove RTP header extensions (not needed for basic call)
+    if (line.startsWith("a=extmap:")) continue;
+    // Remove RTCP feedback params
+    if (line.startsWith("a=rtcp-fb:")) continue;
+    // Remove ssrc lines (browser regenerates)
+    if (line.startsWith("a=ssrc:")) continue;
+    if (line.startsWith("a=ssrc-group:")) continue;
+    // Remove msid
+    if (line.startsWith("a=msid:")) continue;
+    // Remove mid
+    if (line.startsWith("a=mid:")) continue;
+    // Remove rtcp mux/rsize (default on)
+    if (line === "a=rtcp-mux") continue;
+    if (line === "a=rtcp-rsize") continue;
+    // Remove redundant session fields
+    if (line.startsWith("s=")) continue;
+    if (line.startsWith("t=")) continue;
+    // Remove host candidates (only keep srflx/relay for remote)
+    // Keep all for local testing though
+    kept.push(line);
+  }
+
+  return kept.join("\n");
 }
 
 function restoreSdp(sdp: string): string {
-  // WebRTC expects \r\n
-  return sdp.replace(/\n/g, "\r\n") + "\r\n";
+  let restored = sdp.replace(/\n/g, "\r\n");
+  // Re-add required fields if stripped
+  if (!restored.includes("s=")) {
+    restored = restored.replace("o=", "s=-\r\nt=0 0\r\no=");
+  }
+  // Re-add rtcp-mux to each m= section
+  restored = restored.replace(/(m=(?:audio|video)\s[^\r]*)/g, "$1\r\na=rtcp-mux");
+  return restored + "\r\n";
 }
 
 export async function encode(sdp: string): Promise<string> {
