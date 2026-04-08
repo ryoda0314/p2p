@@ -64,8 +64,8 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
           setStatus("disconnected");
           break;
         case "failed":
-          // Auto-retry: recreate PC with stored remote SDP
-          retryConnection();
+          // Defer retry to avoid destroying PC from within its own event handler
+          setTimeout(() => retryConnection(), 500);
           break;
       }
     };
