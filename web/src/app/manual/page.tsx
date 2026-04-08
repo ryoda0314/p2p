@@ -61,6 +61,33 @@ export default function ManualPage() {
     setTimeout(() => setCopied(false), 2000);
   }, []);
 
+  const handleDownload = useCallback((text: string, filename: string) => {
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleFileLoad = useCallback((callback: (text: string) => void) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".txt";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = (reader.result as string).trim();
+        callback(text);
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }, []);
+
   const handleLeave = useCallback(() => {
     rtc.disconnect();
     media.stop();
@@ -143,73 +170,54 @@ export default function ManualPage() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <p className="text-sm text-gray-400">相手から接続コードを受け取った場合:</p>
-                    <textarea
-                      value={pasteInput}
-                      onChange={(e) => setPasteInput(e.target.value)}
-                      placeholder="接続コードを貼り付け..."
-                      className="h-24 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-                    />
+                    <p className="text-sm text-gray-400">相手から接続ファイルを受け取った場合:</p>
                     <button
-                      onClick={() => rtc.receiveOfferAndCreateAnswer(pasteInput)}
-                      disabled={!pasteInput.trim()}
-                      className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => handleFileLoad((text) => {
+                        setPasteInput(text);
+                        rtc.receiveOfferAndCreateAnswer(text);
+                      })}
+                      className="w-full rounded-lg bg-green-600 px-4 py-3 font-medium text-white hover:bg-green-500"
                     >
-                      応答を生成する
+                      接続ファイルを読み込む
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Offerer: show offer, wait for answer */}
+              {/* Offerer: download offer, load answer */}
               {rtc.role === "offerer" && (
                 <div className="space-y-4">
                   {rtc.offerText && (
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-gray-300">
-                          ① この接続コードを相手に送ってください
-                        </p>
-                      </div>
-                      <div className="relative">
-                        <textarea
-                          readOnly
-                          value={rtc.offerText}
-                          className="h-24 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 font-mono text-xs text-gray-300"
-                        />
-                        <button
-                          onClick={() => handleCopy(rtc.offerText)}
-                          className="absolute right-2 top-2 rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-500"
-                        >
-                          {copied ? "コピー済み" : "コピー"}
-                        </button>
-                      </div>
+                      <p className="text-sm font-medium text-gray-300">
+                        ① 接続ファイルをダウンロードして相手に送ってください
+                      </p>
+                      <button
+                        onClick={() => handleDownload(rtc.offerText, "offer.txt")}
+                        className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-500"
+                      >
+                        接続ファイルをダウンロード
+                      </button>
                     </div>
                   )}
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-gray-300">
-                      ② 相手から応答コードを貼り付け
+                      ② 相手から応答ファイルを受け取ったら読み込む
                     </p>
-                    <textarea
-                      value={pasteInput}
-                      onChange={(e) => setPasteInput(e.target.value)}
-                      placeholder="応答コードを貼り付け..."
-                      className="h-24 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-                    />
                     <div className="flex gap-2">
                       <button
-                        onClick={() => rtc.receiveAnswer(pasteInput)}
-                        disabled={!pasteInput.trim()}
-                        className="flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => handleFileLoad((text) => {
+                          rtc.receiveAnswer(text);
+                        })}
+                        className="flex-1 rounded-lg bg-green-600 px-4 py-3 font-medium text-white hover:bg-green-500"
                       >
-                        接続する
+                        応答ファイルを読み込む
                       </button>
                       <button
                         onClick={() => {
-                          setPasteInput("");
                           rtc.createOffer();
                         }}
-                        className="rounded-lg border border-gray-600 px-3 py-2 text-sm text-gray-300 hover:border-gray-400 hover:text-white"
+                        className="rounded-lg border border-gray-600 px-3 py-3 text-sm text-gray-300 hover:border-gray-400 hover:text-white"
                       >
                         再生成
                       </button>
@@ -218,27 +226,20 @@ export default function ManualPage() {
                 </div>
               )}
 
-              {/* Answerer: show answer to copy */}
+              {/* Answerer: download answer */}
               {rtc.role === "answerer" && rtc.answerText && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-gray-300">
-                    この応答コードを相手に送ってください
+                    応答ファイルをダウンロードして相手に送ってください
                   </p>
-                  <div className="relative">
-                    <textarea
-                      readOnly
-                      value={rtc.answerText}
-                      className="h-24 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 font-mono text-xs text-gray-300"
-                    />
-                    <button
-                      onClick={() => handleCopy(rtc.answerText)}
-                      className="absolute right-2 top-2 rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-500"
-                    >
-                      {copied ? "コピー済み" : "コピー"}
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => handleDownload(rtc.answerText, "answer.txt")}
+                    className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-500"
+                  >
+                    応答ファイルをダウンロード
+                  </button>
                   <p className="text-xs text-gray-500">
-                    相手がこのコードを貼り付けると自動的に接続されます
+                    相手がこのファイルを読み込むと接続されます
                   </p>
                 </div>
               )}
