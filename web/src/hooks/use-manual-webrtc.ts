@@ -21,6 +21,9 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const gatherDoneRef = useRef<(() => void) | null>(null);
+  const remoteSdpRef = useRef<{ type: RTCSdpType; sdp: string } | null>(null);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 3;
 
   function createPC(): RTCPeerConnection {
     cleanup();
@@ -44,7 +47,6 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
 
     pc.onicecandidate = (event) => {
       if (!event.candidate) {
-        // ICE gathering complete - localDescription now contains all candidates
         gatherDoneRef.current?.();
       }
     };
@@ -54,14 +56,16 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
       switch (pc.connectionState) {
         case "connected":
           setStatus("connected");
+          setError(null);
+          retryCountRef.current = 0;
           break;
         case "disconnected":
         case "closed":
           setStatus("disconnected");
           break;
         case "failed":
-          setStatus("failed");
-          setError("接続に失敗しました。");
+          // Auto-retry: recreate PC with stored remote SDP
+          retryConnection();
           break;
       }
     };
@@ -76,12 +80,43 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
 
     pc.oniceconnectionstatechange = () => {
       console.log("[WebRTC] iceConnectionState:", pc.iceConnectionState);
-      if (pc.iceConnectionState === "failed") {
-        pc.restartIce();
-      }
     };
 
     return pc;
+  }
+
+  async function retryConnection(): Promise<void> {
+    const remote = remoteSdpRef.current;
+    if (!remote || retryCountRef.current >= MAX_RETRIES) {
+      setStatus("failed");
+      setError("接続に失敗しました。両方のタブでやり直してください。");
+      return;
+    }
+
+    retryCountRef.current++;
+    console.log(`[WebRTC] Retry ${retryCountRef.current}/${MAX_RETRIES}...`);
+    setStatus("connecting");
+
+    const pc = createPC();
+
+    try {
+      if (remote.type === "offer") {
+        // We are the answerer
+        await pc.setRemoteDescription(remote);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+      } else {
+        // We are the offerer - recreate offer then apply stored answer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitForIceGathering();
+        await pc.setRemoteDescription(remote);
+      }
+    } catch (err) {
+      console.error("[WebRTC] Retry failed:", err);
+      setStatus("failed");
+      setError("再接続に失敗しました。");
+    }
   }
 
   function waitForIceGathering(): Promise<void> {
@@ -118,25 +153,37 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localStream]);
 
+  const receivingRef = useRef(false);
+
   const receiveAnswer = useCallback(async (text: string) => {
-    const pc = pcRef.current;
-    if (!pc) {
-      setError("接続がリセットされました。「再生成」を押してください。");
-      return;
-    }
-
-    console.log("[WebRTC] receiveAnswer signalingState:", pc.signalingState);
-
-    if (pc.signalingState !== "have-local-offer") {
-      setError("接続がリセットされました。「再生成」を押してください。");
-      return;
-    }
+    // Guard against double-calls
+    if (receivingRef.current) return;
+    receivingRef.current = true;
 
     try {
+      const pc = pcRef.current;
+      if (!pc) {
+        setError("接続がリセットされました。「再生成」を押してください。");
+        return;
+      }
+
+      console.log("[WebRTC] receiveAnswer signalingState:", pc.signalingState);
+
+      // Already processed - ignore silently
+      if (pc.signalingState === "stable") return;
+
+      if (pc.signalingState !== "have-local-offer") {
+        setError("接続がリセットされました。「再生成」を押してください。");
+        return;
+      }
+
       const sdp = await decode(text);
+      remoteSdpRef.current = { type: "answer", sdp };
       await pc.setRemoteDescription({ type: "answer", sdp });
     } catch (err) {
       setError(`応答コードが不正です: ${err}`);
+    } finally {
+      receivingRef.current = false;
     }
   }, []);
 
@@ -149,6 +196,7 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
         setAnswerText("");
 
         const sdp = await decode(text);
+        remoteSdpRef.current = { type: "offer", sdp };
         const pc = createPC();
         await pc.setRemoteDescription({ type: "offer", sdp });
 
@@ -173,6 +221,8 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
       pcRef.current.ontrack = null;
       pcRef.current.onconnectionstatechange = null;
       pcRef.current.oniceconnectionstatechange = null;
+      pcRef.current.onsignalingstatechange = null;
+      pcRef.current.onicegatheringstatechange = null;
       pcRef.current.close();
       pcRef.current = null;
     }
@@ -182,6 +232,9 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
 
   const disconnect = useCallback(() => {
     cleanup();
+    remoteSdpRef.current = null;
+    retryCountRef.current = 0;
+    receivingRef.current = false;
     setStatus("disconnected");
     setError(null);
     setOfferText("");
