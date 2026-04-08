@@ -2,20 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import { getRtcConfig } from "@/lib/rtc-config";
+import { encode, decode } from "@/lib/signal-codec";
 import type { ConnectionStatus } from "@/lib/types";
 
 type Role = "offerer" | "answerer" | null;
-
-interface PendingCandidate {
-  candidate: string;
-  sdpMid: string | null;
-  sdpMLineIndex: number | null;
-}
-
-interface SignalData {
-  sdp: string;
-  candidates: PendingCandidate[];
-}
 
 interface UseManualWebRTCOptions {
   localStream: MediaStream | null;
@@ -30,14 +20,12 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
   const [role, setRole] = useState<Role>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const candidatesRef = useRef<PendingCandidate[]>([]);
   const gatherDoneRef = useRef<(() => void) | null>(null);
 
   function createPC(): RTCPeerConnection {
     cleanup();
     const pc = new RTCPeerConnection(getRtcConfig());
     pcRef.current = pc;
-    candidatesRef.current = [];
 
     if (localStream) {
       localStream.getTracks().forEach((track) => {
@@ -55,14 +43,8 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
     };
 
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        candidatesRef.current.push({
-          candidate: event.candidate.candidate,
-          sdpMid: event.candidate.sdpMid,
-          sdpMLineIndex: event.candidate.sdpMLineIndex,
-        });
-      } else {
-        // ICE gathering complete
+      if (!event.candidate) {
+        // ICE gathering complete - localDescription now contains all candidates
         gatherDoneRef.current?.();
       }
     };
@@ -98,12 +80,10 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
     if (pc.iceGatheringState === "complete") return Promise.resolve();
     return new Promise((resolve) => {
       gatherDoneRef.current = resolve;
-      // Timeout after 5 seconds in case gathering stalls
       setTimeout(resolve, 5000);
     });
   }
 
-  // Step 1: Offerer creates an offer
   const createOffer = useCallback(async () => {
     try {
       setRole("offerer");
@@ -115,15 +95,11 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
       const pc = createPC();
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-
       await waitForIceGathering();
 
-      const data: SignalData = {
-        sdp: pc.localDescription!.sdp,
-        candidates: candidatesRef.current,
-      };
-
-      setOfferText(btoa(JSON.stringify(data)));
+      // After gathering, localDescription.sdp contains SDP + all ICE candidates
+      const code = await encode(pc.localDescription!.sdp);
+      setOfferText(code);
       setStatus("waiting");
     } catch (err) {
       setError(`Offer作成失敗: ${err}`);
@@ -132,7 +108,6 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localStream]);
 
-  // Step 2: Offerer receives the answer
   const receiveAnswer = useCallback(async (text: string) => {
     const pc = pcRef.current;
     if (!pc) {
@@ -141,22 +116,13 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
     }
 
     try {
-      const data: SignalData = JSON.parse(atob(text.trim()));
-      await pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
-
-      for (const c of data.candidates) {
-        await pc.addIceCandidate({
-          candidate: c.candidate,
-          sdpMid: c.sdpMid,
-          sdpMLineIndex: c.sdpMLineIndex,
-        });
-      }
+      const sdp = await decode(text);
+      await pc.setRemoteDescription({ type: "answer", sdp });
     } catch (err) {
       setError(`応答コードが不正です: ${err}`);
     }
   }, []);
 
-  // Step A: Answerer receives the offer and creates an answer
   const receiveOfferAndCreateAnswer = useCallback(
     async (text: string) => {
       try {
@@ -165,30 +131,16 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
         setError(null);
         setAnswerText("");
 
-        const data: SignalData = JSON.parse(atob(text.trim()));
-
+        const sdp = await decode(text);
         const pc = createPC();
-        await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
-
-        for (const c of data.candidates) {
-          await pc.addIceCandidate({
-            candidate: c.candidate,
-            sdpMid: c.sdpMid,
-            sdpMLineIndex: c.sdpMLineIndex,
-          });
-        }
+        await pc.setRemoteDescription({ type: "offer", sdp });
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-
         await waitForIceGathering();
 
-        const answerData: SignalData = {
-          sdp: pc.localDescription!.sdp,
-          candidates: candidatesRef.current,
-        };
-
-        setAnswerText(btoa(JSON.stringify(answerData)));
+        const code = await encode(pc.localDescription!.sdp);
+        setAnswerText(code);
       } catch (err) {
         setError(`接続コードが不正です: ${err}`);
         setStatus("failed");
@@ -208,7 +160,6 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
       pcRef.current = null;
     }
     setRemoteStream(null);
-    candidatesRef.current = [];
     gatherDoneRef.current = null;
   }, []);
 
