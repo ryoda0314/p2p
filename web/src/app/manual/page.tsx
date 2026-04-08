@@ -196,13 +196,24 @@ export default function ManualPage() {
                       placeholder="応答コードを貼り付け..."
                       className="h-24 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
                     />
-                    <button
-                      onClick={() => rtc.receiveAnswer(pasteInput)}
-                      disabled={!pasteInput.trim()}
-                      className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      接続する
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => rtc.receiveAnswer(pasteInput)}
+                        disabled={!pasteInput.trim()}
+                        className="flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        接続する
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPasteInput("");
+                          rtc.createOffer();
+                        }}
+                        className="rounded-lg border border-gray-600 px-3 py-2 text-sm text-gray-300 hover:border-gray-400 hover:text-white"
+                      >
+                        再生成
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

@@ -121,7 +121,14 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
   const receiveAnswer = useCallback(async (text: string) => {
     const pc = pcRef.current;
     if (!pc) {
-      setError("先にOfferを作成してください。");
+      setError("接続がリセットされました。「再生成」を押してください。");
+      return;
+    }
+
+    console.log("[WebRTC] receiveAnswer signalingState:", pc.signalingState);
+
+    if (pc.signalingState !== "have-local-offer") {
+      setError("接続がリセットされました。「再生成」を押してください。");
       return;
     }
 

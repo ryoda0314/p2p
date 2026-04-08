@@ -29,34 +29,16 @@ function fromBase64Url(str: string): Uint8Array {
   return bytes;
 }
 
-function stripSdp(sdp: string): string {
-  const lines = sdp.split("\r\n").filter(Boolean);
-  const kept: string[] = [];
-
-  for (const line of lines) {
-    // Only strip lines that are proven safe to remove
-    if (line.startsWith("a=extmap-allow-mixed")) continue;
-    if (line.startsWith("a=extmap:")) continue;
-    if (line.startsWith("a=ssrc:")) continue;
-    if (line.startsWith("a=ssrc-group:")) continue;
-    kept.push(line);
-  }
-
-  return kept.join("\n");
-}
-
-function restoreSdp(sdp: string): string {
-  return sdp.replace(/\n/g, "\r\n") + "\r\n";
-}
-
 export async function encode(sdp: string): Promise<string> {
-  const stripped = stripSdp(sdp);
-  const compressed = await compress(stripped);
+  // Replace \r\n with \n to save bytes before compression
+  const compact = sdp.replace(/\r\n/g, "\n");
+  const compressed = await compress(compact);
   return toBase64Url(compressed);
 }
 
 export async function decode(code: string): Promise<string> {
   const bytes = fromBase64Url(code.trim());
   const sdp = await decompress(bytes);
-  return restoreSdp(sdp);
+  // Restore \r\n that WebRTC expects
+  return sdp.replace(/\n/g, "\r\n");
 }
