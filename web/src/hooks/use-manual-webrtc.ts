@@ -50,6 +50,7 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
     };
 
     pc.onconnectionstatechange = () => {
+      console.log("[WebRTC] connectionState:", pc.connectionState);
       switch (pc.connectionState) {
         case "connected":
           setStatus("connected");
@@ -65,7 +66,16 @@ export function useManualWebRTC({ localStream }: UseManualWebRTCOptions) {
       }
     };
 
+    pc.onsignalingstatechange = () => {
+      console.log("[WebRTC] signalingState:", pc.signalingState);
+    };
+
+    pc.onicegatheringstatechange = () => {
+      console.log("[WebRTC] iceGatheringState:", pc.iceGatheringState);
+    };
+
     pc.oniceconnectionstatechange = () => {
+      console.log("[WebRTC] iceConnectionState:", pc.iceConnectionState);
       if (pc.iceConnectionState === "failed") {
         pc.restartIce();
       }

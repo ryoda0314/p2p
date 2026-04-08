@@ -34,29 +34,11 @@ function stripSdp(sdp: string): string {
   const kept: string[] = [];
 
   for (const line of lines) {
-    // Remove session boilerplate
-    if (line.startsWith("a=msid-semantic")) continue;
-    if (line.startsWith("a=group:BUNDLE")) continue;
+    // Only strip lines that are proven safe to remove
     if (line.startsWith("a=extmap-allow-mixed")) continue;
-    // Remove RTP header extensions (not needed for basic call)
     if (line.startsWith("a=extmap:")) continue;
-    // Remove RTCP feedback params
-    if (line.startsWith("a=rtcp-fb:")) continue;
-    // Remove ssrc lines (browser regenerates)
     if (line.startsWith("a=ssrc:")) continue;
     if (line.startsWith("a=ssrc-group:")) continue;
-    // Remove msid
-    if (line.startsWith("a=msid:")) continue;
-    // Remove mid
-    if (line.startsWith("a=mid:")) continue;
-    // Remove rtcp mux/rsize (default on)
-    if (line === "a=rtcp-mux") continue;
-    if (line === "a=rtcp-rsize") continue;
-    // Remove redundant session fields
-    if (line.startsWith("s=")) continue;
-    if (line.startsWith("t=")) continue;
-    // Remove host candidates (only keep srflx/relay for remote)
-    // Keep all for local testing though
     kept.push(line);
   }
 
@@ -64,14 +46,7 @@ function stripSdp(sdp: string): string {
 }
 
 function restoreSdp(sdp: string): string {
-  let restored = sdp.replace(/\n/g, "\r\n");
-  // Re-add required fields if stripped
-  if (!restored.includes("s=")) {
-    restored = restored.replace("o=", "s=-\r\nt=0 0\r\no=");
-  }
-  // Re-add rtcp-mux to each m= section
-  restored = restored.replace(/(m=(?:audio|video)\s[^\r]*)/g, "$1\r\na=rtcp-mux");
-  return restored + "\r\n";
+  return sdp.replace(/\n/g, "\r\n") + "\r\n";
 }
 
 export async function encode(sdp: string): Promise<string> {
